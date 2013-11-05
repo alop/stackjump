@@ -1,27 +1,23 @@
 #!/bin/sh
 
-SKELURL="http://github.com/jhtran/stackjump_att_skeleton"
-PRESURL='https://raw.github.com/jhtran/stackjump_att_skeleton/master/preseed.cfg'
+echo ## This tool should only be run on a Linux workstation ##
+echo ## This code is customized for AT&T environment usage only ##
+echo ## So far only tested on Precise Pangolin 12.04.3 x64 ##
+
 USAGE="$0 options
-  -d skeleton directory (preseed.cfg must exist in dir root)
-  -g github repo skeleton directory (must be github hosted)
+  -g chef-repo github url
   -a architecture [i386|amd64]
   -r release_codename (oneiric, natty, maverick, etc)
-  -cg chef repo github
-  -cd chef repo directory
+  -v release_version
   -rl chef run list for jump node (comma delimited)
-  -o <file> Write output to <file> instead of custom.iso
+  -o output iso
   -k keep tmp dir
-
-  See $SKELURL"
 
 if [ ! $1 ]; then
   echo "$USAGE" && exit 1
 else
   while [ $1 ];do
     case $1 in
-      -d) shift
-          CDIR=$1;;
       -g) shift
           GITH=$1;;
       -a) shift
@@ -32,14 +28,10 @@ else
           VER=$1;;
       -o) shift
           ISO=$1;;
-      -cg) shift
-           CHEFGITH=$1;;
-      -cd) shift
-           CHEFCDIR=$1;;
       -rl) shift
            CHEFRUNLIST=$1;;
-      -k) KEEP=1;;
-      -t) TEST=1;;
+      -k) shift
+          KEEP=1;;
       *) echo "$USAGE" && exit 1;;
     esac
     shift
@@ -50,14 +42,22 @@ if [ ! $VER]; then
   VER='12.04.3'
 fi
 DISTURL="http://releases.ubuntu.com"
+RELURL="$DISTURL/$REL/$VER"
 
-DATETIME=`date +%m%d%y%H%M`
-TMPDIR="/tmp/$DATETIME"
+TMPDIR="/tmp/stackjump"
 ISODIR="$TMPDIR/ISO"
 INITRD="$TMPDIR/initrd"
-mkdir -p $ISODIR $INITRD
-if [ $? != 0 ]; then
-  echo "Unable to create tmpdir $TMPDIR subdir(s)" && exit
+
+if [ ! -d $TMPDIR ]; then
+  mkdir -p $TMPDIR
+fi
+
+if [ ! -d $ISODIR ]; then
+  mkdir -p $ISODIR
+fi
+
+if [ ! -d $INITRD ]; then
+  mkdir -p $INITRD
 fi
 
 ## SANITY CHECKS ##
@@ -68,18 +68,6 @@ for BIN in fakeroot cpio mkisofs curl; do
   fi
 done
 
-if ([ $GITH ] && [ $CDIR ]) ; then
-  echo "Use only one of the -d or -g flags." && exit 1
-fi
-
-if [ $CDIR ]; then
-  if [ ! -d $CDIR ]; then
-    echo "Directory $CDIR invalid" && exit 1
-  else
-    PRESEED="$CDIR/preseed.cfg"
-  fi
-fi
-
 if [ ! $ISO ]; then
   ISO='custom.iso'
 fi
@@ -87,10 +75,12 @@ fi
 if [ ! $ARCH ]; then
   ARCH=`arch`
 fi
+
 case $ARCH in
   'i686') ARCH='i386';;
   'x86_64') ARCH='amd64';;
 esac
+
 if [ $ARCH != 'i386' ] && [ $ARCH != 'amd64' ]; then
   echo "Architecture $ARCH is not valid.  (amd64|i386)" && exit 1
 fi
@@ -98,7 +88,6 @@ fi
 if [ ! $REL ]; then
   REL='precise'
 fi
-RELURL="$DISTURL/$REL/$VER"
 
 HEAD=`curl -s --head $RELURL|head -1`
 HCODE=`expr "$HEAD" : 'HTTP\/... \(...\) '`
@@ -108,46 +97,21 @@ if [ "$HCODE" != '200' ]; then
 fi
 
 if [ $GITH ]; then
-  GITNAME=`expr $GITH : '.*github.com/\(.*\).git'`
+  GITNAME=`expr $GITH : '.*github.com/\(.*\)'`
   if [ ! $GITNAME ]; then
     echo "$GITH invalid github repo url" && exit 1
   fi
-  echo "Exporting github repo..."
+  echo "Exporting GITHUB CHEF REPO..."
   OUTPUT=`(cd $TMPDIR ; curl -kLs https://github.com/$GITNAME/tarball/master|tar -zxv)`
   GITDIR="$TMPDIR/`echo $OUTPUT|awk '{print $1}'`"
   if [ ! $GITDIR ]; then
-    echo "Unable to download repo tarball" && exit 1
-  fi
-  CDIR=$GITDIR
-  PRESEED="$GITDIR/preseed.cfg"
-    if [ ! -f $PRESEED ]; then
-        echo "$GITDIR/preseed.cfg doesn't exist" && exit 1
-    fi
-  fi
-fi
-
-if [ $CHEFCDIR ]; then
-  if [ ! -d $CHEFCDIR ]; then
-    echo "$CHEFCDIR not a valid dir" && exit 1
+    echo "Unable to download GITHUB CHEF REPO tarball https://github.com/$GITNAME/tarball/master" && exit 1
   fi
 fi
 
 ### MAKING THE ISO ##
-#echo "Downloading linux files.."
-#if [ $PLATFORM = 'ubuntu' ]; then
-#  FURL="${RELURL}main/installer-${ARCH}/current/images/netboot/ubuntu-installer/$ARCH"
-#  # let me know if you find a better url for isolinux.bin
-#  BURL="http://slackware.osuosl.org/slackware-current/isolinux/isolinux.bin"
-#  if [ $TEST ]; then
-#    touch $ISODIR/linux
-#    touch $ISODIR/isolinux.bin
-#    TESTUB=$TMPDIR/testub
-#    echo $FURL >> $TESTUB
-#  else
-#    curl $FURL/linux -o $ISODIR/linux
-#    if [ ! -f $ISODIR/linux ]; then
-#      echo "Unable to download linux" && exit 1
-#    fi
+echo "Downloading ISO.."
+curl $REULURL -o $TMPDIR
 #    (cd $INITRD && curl $FURL/initrd.gz| gzip -dc|fakeroot cpio -id )
 #    if [ ! -f $INITRD/init ]; then
 #      echo "Unable to download initrd.gz" && exit 1
