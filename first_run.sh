@@ -11,8 +11,8 @@ if [ -d /root/.chef ]; then
   rm -rf /root/.chef
 fi
 /root/knife_first_run
-knife cookbook upload -o /root/extras/chef-repo/cookbooks --all
 knife configure client /etc/chef && chef-client
+knife cookbook upload -o /root/extras/chef-repo/cookbooks --all
 knife node run_list add $FQDN "recipe[chef-client]"
 sleep 2
 chef-client
