@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 echo "\n## This tool should only be run on a Linux workstation ##"
 echo "## This code is customized for AT&T environment usage only ##"
@@ -9,6 +9,10 @@ MYPASSWD='$6$Cjxz1rgM$ahShoUXrRY0qabPBMuFSmxRcwqkA2BRmb0B9Dlkzd5BfiunORoayXm3RZC
 KNIFE_PASSWD='mypassword'
 NODE_NAME='myjumpnode'
 
+# as of 11/05/13 these are the lastest versions
+CHEF_CLIENT_VER="11.8.0-1"
+CHEF_SERVER_VER="11.0.8-1"
+
 WHOAMI=`whoami`
 if [ $WHOAMI != "root" ]; then
   echo "Must be run as sudo root"
@@ -16,7 +20,8 @@ if [ $WHOAMI != "root" ]; then
 fi
 
 USAGE="$0 options
-  -e extras dir
+  -d dry run don't create iso
+  -c chef repo dir
   -a architecture [i386|amd64]
   -r release_codename (oneiric, natty, maverick, etc)
   -v release_version
@@ -26,8 +31,10 @@ USAGE="$0 options
 
 while [ $1 ];do
   case $1 in
-    -e) shift
-        EXTRASD=$1;;
+    -d) shift
+        DRYRUN=1;;
+    -c) shift
+        CHEFREPO=$1;;
     -a) shift
         ARCH=$1;;
     -r) shift
@@ -212,13 +219,52 @@ cp authorized_keys $INITRD/extras/root/.ssh
 sed -i "s/MYPASSWORD/$KNIFE_PASSWD/g" $INITRD/extras/root/knife_first_run
 sed -i "s/MYJUMPNODE/$NODE_NAME/g" $INITRD/extras/root/knife_first_run
 
-# IMPORT THE CHEF REPO
-if [ ! -z $EXTRASD ] && [ -d $EXTRASD ]; then
-  echo "COPYING EXTRAS $EXTRASD..."
-  cp -r $EXTRASD $ISODIR/extras
-fi
+# DOWNLOAD LATEST CHEF OMNIBUS PACKAGES
 if [ ! -d $ISODIR/extras ] ; then
   mkdir $ISODIR/extras
+fi
+
+OMNIBUS_URL="https://opscode-omnibus-packages.s3.amazonaws.com/ubuntu"
+IFS=. read -r maj min _ <<< "$VER"
+OMNI_VER="$maj.$min"
+# Only available in x86_64
+OMNI_ARCH="x86_64"  
+CHEFCLIENT="chef_$CHEF_CLIENT_VER.ubuntu.${OMNI_VER}_${ARCH}.deb"
+CHEFC_URL="$OMNIBUS_URL/$OMNI_VER/$OMNI_ARCH/$CHEFCLIENT"
+if [ -f $ISODIR/extras/$CHEFCLIENT ]; then
+  echo "$ISODIR/extras/$CHEFCLIENT exists - skipping chef client download"
+else
+  curl $CHEFC_URL -o $ISODIR/extras/$CHEFCLIENT
+fi
+CHEFSERVER="chef-server_$CHEF_SERVER_VER.ubuntu.${OMNI_VER}_${ARCH}.deb"
+CHEFS_URL="$OMNIBUS_URL/$OMNI_VER/$OMNI_ARCH/$CHEFSERVER"
+if [ -f $ISODIR/extras/$CHEFSERVER ]; then
+  echo "$ISODIR/extras/$CHEFSERVER exists - skipping chef server download"
+else
+  curl $CHEFS_URL -o $ISODIR/extras/$CHEFSERVER
+fi
+
+## IMPORT THE CHEF REPO
+MYCHEFREPO="$ISODIR/extras/chef-repo"
+if [ ! -d $MYCHEFREPO ]; then
+  mkdir -p $MYCHEFREPO/cookbooks $MYCHEFREPO/roles
+fi
+if [ ! -z $CHEFREPO ] && [ -d $CHEFREPO ]; then
+  echo "COPYING EXTRAS $CHEFREPO..."
+  rsync -av $CHEFREPO/ $MYCHEFREPO/
+fi
+
+CHEFCLIENTD=$MYCHEFREPO/cookbooks/chef-client
+if [ ! -f $CHEFCLIENTD/README.md ]; then
+  if [ ! -d $CHEFCLIENTD ]; then
+    mkdir -p $CHEFCLIENTD
+  fi
+  echo "Downloading chef-client cookbook from github"
+  OUTPUT=`(cd $TMPDIR; curl -kLs https://github.com/opscode-cookbooks/chef-client/tarball/master | tar -zxv)`
+  DLTMP="$TMPDIR/`echo $OUTPUT|awk '{print $1}'`"
+  rsync -av $DLTMP/ $CHEFCLIENTD/
+else
+  echo "Chef-client cookbook already exists - skipping download"
 fi
 
 echo "Making the ISO..."
@@ -226,11 +272,19 @@ echo "Making the ISO..."
 (cd $INITRD ; find . | cpio -H newc --create | gzip -9 > $ISODIR/install/initrd.gz)
 
 # CREATE ISO
-mkisofs -r -V "Custom Auto Ubuntu Install" -cache-inodes -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $ISO $ISODIR
+if [ $DRYRUN ]; then
+  echo "DRYRUN - skipping ISO creation"
+else
+  mkisofs -r -V "Custom Auto Ubuntu Install" -cache-inodes -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $ISO $ISODIR
+fi
 
 umount $MOUNTDIR
 if [ ! -f $ISO ]; then
   echo "Create ISO failed." && exit 1
 else
-  echo "$ISO successfully created" && exit 0
+  if [ $DRYRUN ]; then
+    echo "successfully completed" && exit 0
+  else
+    echo "$ISO successfully created" && exit 0
+  fi
 fi
