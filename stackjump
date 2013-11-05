@@ -4,6 +4,11 @@ echo "\n## This tool should only be run on a Linux workstation ##"
 echo "## This code is customized for AT&T environment usage only ##"
 echo "## So far only tested on Precise Pangolin 12.04.3 x64 ##\n"
 
+# password hash to set for ubuntu user account on install
+MYPASSWD='$6$Cjxz1rgM$ahShoUXrRY0qabPBMuFSmxRcwqkA2BRmb0B9Dlkzd5BfiunORoayXm3RZCEAsauW50JES9v1GTkkurnXmv8Ey0'
+KNIFE_PASSWD='mypassword'
+NODE_NAME='myjumpnode'
+
 WHOAMI=`whoami`
 if [ $WHOAMI != "root" ]; then
   echo "Must be run as sudo root"
@@ -11,7 +16,7 @@ if [ $WHOAMI != "root" ]; then
 fi
 
 USAGE="$0 options
-  -g chef-repo github url
+  -e extras dir
   -a architecture [i386|amd64]
   -r release_codename (oneiric, natty, maverick, etc)
   -v release_version
@@ -21,8 +26,8 @@ USAGE="$0 options
 
 while [ $1 ];do
   case $1 in
-    -g) shift
-        GITH=$1;;
+    -e) shift
+        EXTRASD=$1;;
     -a) shift
         ARCH=$1;;
     -r) shift
@@ -99,19 +104,6 @@ if [ "$HCODE" != '200' ]; then
   echo "Check $ISOURL to make sure a valid release codename" && exit 1
 fi
 
-if [ $GITH ]; then
-  GITNAME=`expr $GITH : '.*github.com/\(.*\)'`
-  if [ ! $GITNAME ]; then
-    echo "$GITH invalid github repo url" && exit 1
-  fi
-  echo "Exporting GITHUB CHEF REPO..."
-  OUTPUT=`(cd $TMPDIR ; curl -kLs https://github.com/$GITNAME/tarball/master|tar -zxv)`
-  GITDIR="$TMPDIR/`echo $OUTPUT|awk '{print $1}'`"
-  if [ ! $GITDIR ]; then
-    echo "Unable to download GITHUB CHEF REPO tarball https://github.com/$GITNAME/tarball/master" && exit 1
-  fi
-fi
-
 ### MAKING THE ISO ##
 if [ -f "$TMPDIR/$ISONAME" ]; then
   echo "$TMPDIR/$ISONAME exists - skipping download"
@@ -150,7 +142,7 @@ cat>"$ISODIR/isolinux/isolinux.cfg"<<EOF
   append auto ramdisk_size=14984 initrd=/install/initrd.gz vga=normal DEBCONF_DEBUG=5
 EOF
 
-echo "INJECTING PRESEED AND LATE|FIRST_RUN SCRIPTS"
+echo "INJECTING PRESEED AND CUSTOM SCRIPTS"
 
 cat>"$INITRD/preseed.cfg"<<EOF
 d-i debian-installer/locale string en_US
@@ -194,7 +186,7 @@ d-i partman/confirm boolean true
 d-i passwd/root-login boolean false
 d-i passwd/user-fullname string Ubuntu User
 d-i passwd/username string ubuntu
-d-i passwd/user-password-crypted password $6$Cjxz1rgM$ahShoUXrRY0qabPBMuFSmxRcwqkA2BRmb0B9Dlkzd5BfiunORoayXm3RZCEAsauW50JES9v1GTkkurnXmv8Ey0
+d-i passwd/user-password-crypted password $MYPASSWD
 d-i user-setup/encrypt-home boolean false
 d-i pkgsel/include string openssh-server curl vim
 d-i pkgsel/update-policy select none
@@ -212,269 +204,33 @@ d-i finish-install/reboot_in_progress note
 EOF
 
 EXTRAS="$INITRD/extras/root"
-if [ ! -d $EXTRAS ]; then
-  mkdir -p $EXTRAS
+if [ ! -d $EXTRAS/root/.ssh ]; then
+  mkdir -p $EXTRAS/root/.ssh
 fi
-cat>"$INITRD/extras/root/late_command.sh"<<EOF
-EOF
-#
-#if [ ! -f $SOLOD/solo.rb ]; then
-#  cat>$SOLOD/solo.rb<<EOF
-#file_cache_path "/root/chef-solo"
-#cookbook_path "/root/chef-solo/cookbooks"
-#EOF
-#fi
-#
-#if [ ! -f $SOLOD/solo.json ]; then
-#  cat>$SOLOD/solo.json<<EOF
-#{
-#  "run_list": [ "recipe[chef-server::default]" ]
-#}
-#EOF
-#fi
-#
-#RANDOMPW=`cat /dev/urandom| tr -dc 'a-zA-Z0-9' | fold -w 10| head -n 1`
-#CHEFSEED="$CHEFS/files/default/chef-server.seed"
-#if [ ! -f $CHEFSEED ]; then
-#  echo "chef-server-webui chef-server-webui/admin_password password $RANDOMPW" >> $CHEFSEED
-#  echo "chef-solr chef-solr/amqp_password password $RANDOMPW" >> $CHEFSEED
-#fi
-#
-#RECIPE="$CHEFS/recipes/default.rb"
-#if [ ! -f $RECIPE ]; then
-#  cat>$RECIPE<<EOF
-#if (platform?("ubuntu"))
-#	package 'chef-server' do
-#		action :install
-#  		response_file "chef-server.seed"
-#	end
-#elsif (platform?("centos"))
-#	package 'rubygem-chef-server' do
-#		action :install
-#	end
-#end
-#EOF
-#fi
-#
-#FRUN="$ROOTD/first_run.sh"
-#if [ ! -f $FRUN ]; then
-#  cat>$FRUN<<EOF
-##!/bin/sh
-#if [ $PLATFORM = "ubuntu" ]; then
-#  apt-get update
-#  update-grub
-#elif [ $PLATFORM = "centos" ];then
-#  yum update -y
-#fi
-#CFDIR="/root/chef-solo"
-#echo "installing chef-server"
-#chef-solo -c \$CFDIR/solo.rb -j \$CFDIR/solo.json
-#echo "done installing chef-server"
-#if [ $PLATFORM = "centos" ]; then
-#  setup-chef-server.sh
-#fi
-#ETC='/etc/chef'
-#HOMEC='/home/ubuntu/.chef'
-#mkdir \$HOMEC
-#cp \$ETC/webui.pem \$HOMEC
-#cp \$ETC/validation.pem \$HOMEC
-#chown -R ubuntu \$HOMEC
-#sleep 20
-#echo "running knife configure -i for ubuntu user"
-#su ubuntu -c "ruby /home/ubuntu/knife_first_run.rb"
-#CHEFREPO="/home/ubuntu/chef-repo"
-#chown -R ubuntu \$CHEFREPO
-#FQDN=\`hostname --fqdn\`
-#if [ ! -d \$CHEFREPO/cookbooks/apt ] ; then
-#  if [ $PLATFORM = "ubuntu" ]
-#    echo "install apt cookbook from community opscode"
-#  s  u ubuntu -c "knife cookbook site install apt"
-#  fi
-#fi
-#echo "uploading chef repo cookbooks..."
-#( cd \$CHEFREPO ; su ubuntu -c "knife cookbook upload --all" )
-#echo "running chef client to register"
-#chef-client
-#echo "listing /etc/chef"
-#ls -ald /etc/chef/*
-#echo "listing knife clients"
-#su ubuntu -c "knife node list"
-#echo "adding run list to admin node..."
-#RUNLIST=\`cat \$CHEFREPO/admin_run_list\`
-#for ckbk in \$RUNLIST; do
-#  echo "knife node run_list add \$FQDN \$ckbk"
-#  su ubuntu -c "knife node run_list add \$FQDN \$ckbk"
-#done
-#echo "running chef client to invoke run list"
-#chef-client
-#sleep 10
-#if [ $PLATFORM = "ubuntu" ]; then
-#  sed -i 's,sh /root/first_run.sh.*,exit 0,' /etc/rc.local;
-#  sed -i '/^\*.*$/d' /etc/issue
-#  reboot
-#elif [ $PLATFORM = "centos" ]; then
-#  sed -i 's/sh \/root\/first_run.sh.*//' /etc/rc.local;
-#  sed -i '/^\*.*$/d' /etc/issue
-#fi
-#EOF
-#fi
-#
-#USER_HOME="$INITRD/root_skel/home/ubuntu"
-#mkdir -p $USER_HOME
-#if [ ! -d $USER_HOME ]; then
-#  echo "Unable to create $USER_HOME" && exit 1
-#fi
-#KFRUN="$USER_HOME/knife_first_run.rb"
-#if [ ! -f $KFRUN ]; then
-#  cat>$KFRUN<<EOF
-##!/usr/bin/ruby
-#require 'rubygems'
-#require 'chef/knife'
-#require 'ftools'
-#homed='/home/ubuntu'
-#homechf="#{homed}/.chef"
-#repod="#{homed}/chef-repo"
-#subcommand_loader = Chef::Knife::SubcommandLoader.new(false)
-#commands_loaded = subcommand_loader.load_commands
-#knifeconf = Chef::Knife::Configure
-#knifeconf.load_deps
-#instance = knifeconf.new(["configure", "-i"])
-#instance.config[:config_file]="#{homechf}/knife.rb"
-#instance.config[:chef_server_url]='http://localhost:4000'
-#instance.config[:node_name]='ubuntu'
-#instance.config[:admin_client_name]='chef-webui'
-#instance.config[:admin_client_key]="#{homechf}/webui.pem"
-#instance.config[:validation_client_name]='chef-validator'
-#instance.config[:validation_key]="#{homechf}/validation.pem"
-#instance.config[:repository]="#{repod}"
-#instance.run_with_pretty_exceptions
-#EOF
-#fi
-#
-#if [ $PLATFORM = "ubuntu" ]; then
-#  if [ ! -f $ROOTD/late_command.sh ]; then
-#  cat>$ROOTD/late_command.sh<<EOF
-#  #!/bin/sh
-#  mkdir /root/.ssh
-#  chmod 700 /root/.ssh /root/first_run.sh
-#  mv /root/authorized_keys /root/.ssh
-#  chmod 400 /root/.ssh/authorized_keys
-#  sed -i 's,quiet splash,quiet,' /etc/default/grub
-#  echo 'GRUB_GFXPAYLOAD_LINUX=text' >> /etc/default/grub
-#  echo '**************************************************' >> /etc/issue
-#  echo '* INSTALL NOT COMPLETE - WILL REBOOT MOMENTARILY *' >> /etc/issue
-#  echo '**************************************************' >> /etc/issue
-#  sed -i 's,exit 0,sh /root/first_run.sh > /root/first_run.log 2>&1,' /etc/rc.local;
-#EOF
-#  fi
-#elif [ $PLATFORM = "centos" ]; then
-#  if [ ! -f $ROOTD/late_command.sh ]; then
-#    cat>$ROOTD/late_command.sh<<EOF
-#  #!/bin/sh
-#  mkdir /root/.ssh
-#  chmod 700 /root/.ssh /root/first_run.sh
-#  mv /root/authorized_keys /root/.ssh
-#  chmod 400 /root/.ssh/authorized_keys
-#  echo 'GRUB_GFXPAYLOAD_LINUX=text' >> /etc/default/grub
-#  echo '**************************************************' >> /etc/issue
-#  echo '* INSTALL NOT COMPLETE - WILL REBOOT MOMENTARILY *' >> /etc/issue
-#  echo '**************************************************' >> /etc/issue
-#  echo 'sh /root/first_run.sh > /root/first_run.log 2>&1' >> /etc/rc.local;
-#EOF
-#  fi
-#fi
-#
-#REPOERR="invalid dir structure (see https://github.com/opscode/chef-repo)"
-#SUBDIRS="cookbooks certificates config data_bags environments roles"
-#valid_chef_repo() {
-#  DIR=$1
-#  for sdir in $SUBDIRS; do
-#    if [ ! -d $DIR/$sdir ]; then
-#      echo "$DIR $REPOERR" && exit 1
-#    fi
-#  done
-#}
-#
-#CHEFREPO="$USER_HOME/chef-repo"
-#if [ $CHEFCDIR ]; then
-#  # local dir specified
-#  valid_chef_repo $CHEFCDIR
-#  (cd $CHEFCDIR ; git status > /dev/null 2>&1)
-#  if [ $? != 0 ]; then
-#    echo "$CHEFCDIR needs to be valid git repo (git init)" && exit 1
-#  fi
-#  cp -arp $CHEFCDIR $CHEFREPO
-#elif [ $CHEFGITH ]; then
-#  # remote github repo
-#  if [ -d $CHEFREPO ]; then
-#    rm -rf $CHEFREPO
-#  fi
-#  CHEFGITN=`expr $CHEFGITH : '.*github.com/\(.*\).git'`
-#  if [ ! $CHEFGITN ]; then
-#    echo "$CHEFGITH invalid github repo url" && exit 1
-#  fi
-#  echo "Exporting chef github repo..."
-#  OUTPUT=`(cd $TMPDIR; curl -kLs https://github.com/$CHEFGITN/tarball/master|tar -zxv)`
-#  CHEFGITDIR="$TMPDIR/`echo $OUTPUT|awk '{print $1}'`"
-#  if [ ! $CHEFGITDIR ]; then
-#    echo "Unable to download repo tarball" && exit 1
-#  fi
-#  valid_chef_repo $CHEFGITDIR
-#  mv $CHEFGITDIR $CHEFREPO
-#  CKBKDIR="$CHEFREPO/cookbooks"
-#else
-#  # no repo specified, so create empty chef-repo
-#  echo "Creating empty chef repo..."
-#  OPSCODE_URL='http://github.com/opscode/chef-repo/tarball/master'
-#  OUTPUT=`(cd $TMPDIR ; curl -kLs $OPSCODE_URL|tar -zxv)`
-#  OPSCODE_DIR="$TMPDIR/`echo $OUTPUT|awk '{print $1}'`"
-#  mv $OPSCODE_DIR $CHEFREPO
-#  if [ ! -d $CHEFREPO ]; then
-#    echo "Failed creating empty chef repo" && exit 1
-#  fi
-#  (cd $CHEFREPO ; git init ; git add * ; git commit -am 'first commit') > /dev/null 2>&1
-#fi
-#RUNLISTF="$CHEFREPO/admin_run_list"
-#
-#check_runlist() {
-#  for ckbk in $CHEFRUNLIST; do
-#    if [ $ckbk = 'apt']; then
-#      continue
-#    fi
-#    if [ ! -d $CKBKDIR/$ckbk ]; then
-#      echo "$ckbk invalid cookbook" && exit 1
-#    fi
-#  done
-#}
-#
-#if [ $CHEFRUNLIST ]; then
-#  CHEFRUNLIST=`echo $CHEFRUNLIST| sed 's/,/ /g'`
-#  check_runlist
-#  echo $CHEFRUNLIST > $RUNLISTF
-#elif [ -f $RUNLISTF ]; then
-#  CHEFRUNLIST=`cat $RUNLISTF|sed 's/,/ /g'`
-#  check_runlist
-#else
-#  CHEFRUNLIST='apt apt::cacher-ng'
-#  echo $CHEFRUNLIST > $RUNLISTF
-#fi
-#
-#echo "Making the ISO..."
-## make the new initrd.gz
-#(cd $INITRD ; find . | cpio -H newc --create | gzip -9 > $ISODIR/initrd.gz)
-#
-## iso it up
-#mkisofs -q -r -V "Custom Install" -cache-inodes -J -l -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $ISO $ISODIR
-#if [ ! -f $ISO ]; then
-#  echo "Create ISO failed." && exit 1
-#else
-#  if [ $KEEP ]; then
-#    echo "Temp dir: $TMPDIR"
-#  else
-#    rm -rf $TMPDIR
-#  fi
-#  echo "$ISO successfully created" && exit 0
-#fi
-if [ -d $MOUNTDIR/isolinux ]; then
-  umount $MOUNTDIR
+cp first_run.sh late_command.sh knife_first_run $INITRD/extras/root
+cp authorized_keys $INITRD/extras/root/.ssh
+sed -i "s/MYPASSWORD/$KNIFE_PASSWD/g" $INITRD/extras/root/knife_first_run
+sed -i "s/MYJUMPNODE/$NODE_NAME/g" $INITRD/extras/root/knife_first_run
+
+# IMPORT THE CHEF REPO
+if [ ! -z $EXTRASD ] && [ -d $EXTRASD ]; then
+  echo "COPYING EXTRAS $EXTRASD..."
+  cp -r $EXTRASD $ISODIR/extras
+fi
+if [ ! -d $ISODIR/extras ] ; then
+  mkdir $ISODIR/extras
+fi
+
+echo "Making the ISO..."
+# make the new initrd.gz
+(cd $INITRD ; find . | cpio -H newc --create | gzip -9 > $ISODIR/install/initrd.gz)
+
+# CREATE ISO
+mkisofs -r -V "Custom Auto Ubuntu Install" -cache-inodes -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $ISO $ISODIR
+
+umount $MOUNTDIR
+if [ ! -f $ISO ]; then
+  echo "Create ISO failed." && exit 1
+else
+  echo "$ISO successfully created" && exit 0
 fi
