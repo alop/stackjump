@@ -1,5 +1,8 @@
 # Stackjump
 
+
+######## THIS NEEDS TO BE UPDATED DO NOT FOLLOW ANY OF IT ##########
+
 Creates a preseeded mini iso to stand up fully automated Ubuntu install with Chef.
 
 The mini iso created will be small, we're talking less than 20MB.

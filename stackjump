@@ -1,8 +1,14 @@
 #!/bin/sh
 
-echo ## This tool should only be run on a Linux workstation ##
-echo ## This code is customized for AT&T environment usage only ##
-echo ## So far only tested on Precise Pangolin 12.04.3 x64 ##
+echo "\n## This tool should only be run on a Linux workstation ##"
+echo "## This code is customized for AT&T environment usage only ##"
+echo "## So far only tested on Precise Pangolin 12.04.3 x64 ##\n"
+
+WHOAMI=`whoami`
+if [ $WHOAMI != "root" ]; then
+  echo "Must be run as sudo root"
+  exit 1
+fi
 
 USAGE="$0 options
   -g chef-repo github url
@@ -11,40 +17,34 @@ USAGE="$0 options
   -v release_version
   -rl chef run list for jump node (comma delimited)
   -o output iso
-  -k keep tmp dir
+  -k keep tmp dir"
 
-if [ ! $1 ]; then
-  echo "$USAGE" && exit 1
-else
-  while [ $1 ];do
-    case $1 in
-      -g) shift
-          GITH=$1;;
-      -a) shift
-          ARCH=$1;;
-      -r) shift
-          REL=$1;;
-      -v) shift
-          VER=$1;;
-      -o) shift
-          ISO=$1;;
-      -rl) shift
-           CHEFRUNLIST=$1;;
-      -k) shift
-          KEEP=1;;
-      *) echo "$USAGE" && exit 1;;
-    esac
-    shift
-  done
-fi
-
-if [ ! $VER]; then
-  VER='12.04.3'
-fi
-DISTURL="http://releases.ubuntu.com"
-RELURL="$DISTURL/$REL/$VER"
+while [ $1 ];do
+  case $1 in
+    -g) shift
+        GITH=$1;;
+    -a) shift
+        ARCH=$1;;
+    -r) shift
+        REL=$1;;
+    -v) shift
+        VER=$1;;
+    -o) shift
+        ISO=$1;;
+    -rl) shift
+         CHEFRUNLIST=$1;;
+    -k) shift
+        KEEP=1;;
+    *) echo "$USAGE" && exit 1;;
+  esac
+  shift
+done
 
 TMPDIR="/tmp/stackjump"
+if [ ! $REL ]; then
+  REL='precise'
+fi
+
 ISODIR="$TMPDIR/ISO"
 INITRD="$TMPDIR/initrd"
 
@@ -85,15 +85,18 @@ if [ $ARCH != 'i386' ] && [ $ARCH != 'amd64' ]; then
   echo "Architecture $ARCH is not valid.  (amd64|i386)" && exit 1
 fi
 
-if [ ! $REL ]; then
-  REL='precise'
+if [ ! $VER]; then
+  VER='12.04.3'
 fi
+DISTURL="http://releases.ubuntu.com"
+ISONAME="ubuntu-$VER-server-$ARCH.iso"
+ISOURL="$DISTURL/$REL/$ISONAME"
 
-HEAD=`curl -s --head $RELURL|head -1`
+HEAD=`curl -s --head $ISOURL|head -1`
 HCODE=`expr "$HEAD" : 'HTTP\/... \(...\) '`
 if [ "$HCODE" != '200' ]; then
   echo "Release $REL invalid."
-  echo "Check $DISTURL to make sure a valid release codename" && exit 1
+  echo "Check $ISOURL to make sure a valid release codename" && exit 1
 fi
 
 if [ $GITH ]; then
@@ -110,62 +113,110 @@ if [ $GITH ]; then
 fi
 
 ### MAKING THE ISO ##
-echo "Downloading ISO.."
-curl $REULURL -o $TMPDIR
-#    (cd $INITRD && curl $FURL/initrd.gz| gzip -dc|fakeroot cpio -id )
-#    if [ ! -f $INITRD/init ]; then
-#      echo "Unable to download initrd.gz" && exit 1
-#    fi
-#    curl $BURL -o $ISODIR/isolinux.bin
-#  fi
-#fi
-#
-#echo "Creating configs & scripts.."
-#
-#if [ $PLATFORM = "ubuntu" ]; then
-#
-#cat>"$ISODIR/isolinux.cfg"<<EOF
-#  prompt 0
-#  timeout 2
-#  menu hshift 13
-#  menu width 49
-#  menu margin 8
-#  default autoinstall
-#  
-#  label autoinstall
-#  MENU LABEL AUTOMATED INSTALL
-#  kernel linux
-#  append auto ramdisk_size=14984 initrd=initrd.gz vga=normal DEBCONF_DEBUG=5
-#EOF
-#
-#  cp $PRESEED "$INITRD/preseed.cfg"
-#elif [ $PLATFORM = "centos" ]; then
-#
-#cat>"$ISODIR/isolinux.cfg"<<EOF
-#  prompt 0
-#  timeout 2
-#  menu hshift 13
-#  menu width 49
-#  menu margin 8
-#  default autoinstall
-#  
-#  label autoinstall
-#  MENU LABEL AUTOMATED INSTALL
-#  kernel linux
-#  append auto ramdisk_size=14984 initrd=initrd.gz vga=normal ks=file:/ks.cfg ksdevice=eth0 apic
-#EOF
-#  
-#  cp $PRESEED "$INITRD/ks.cfg"
-#fi
-#
-#ROOTD="$INITRD/root_skel/root"
-#SOLOD="$ROOTD/chef-solo"
-#CHEFS="$SOLOD/cookbooks/chef-server"
-#mkdir -p $CHEFS/files/default $CHEFS/recipes
-#
-#if [ $CDIR ] && [ -d $CDIR ]; then
-#  (cd $CDIR ; cp -arp * $INITRD/root_skel)
-#fi
+if [ -f "$TMPDIR/$ISONAME" ]; then
+  echo "$TMPDIR/$ISONAME exists - skipping download"
+else
+  echo "Downloading $ISOURL to $TMPDIR/$ISONAME"
+  curl $ISOURL -o $TMPDIR
+fi
+
+MOUNTDIR="$TMPDIR/mount"
+if [ ! -d $MOUNTDIR ]; then
+  mkdir -p $MOUNTDIR
+fi
+if [ -d $MOUNTDIR/isolinux ]; then
+  echo "ISO already mounted $MOUNTDIR - skipping mount"
+else
+  echo "Mounting to $MOUNTDIR..."
+  mount -o loop $TMPDIR/$ISONAME $MOUNTDIR
+fi
+echo "Copying contents of $ISONAME to $ISODIR"
+rsync -av $MOUNTDIR/ $ISODIR/
+
+(cd $INITRD && gunzip -c $MOUNTDIR/install/initrd.gz| fakeroot cpio -id )
+
+echo "CUSTOMIZING ISOLINUX.cfg"
+cat>"$ISODIR/isolinux/isolinux.cfg"<<EOF
+  prompt 0
+  timeout 2
+  menu hshift 13
+  menu width 49
+  menu margin 8
+  default autoinstall
+  
+  label autoinstall
+  MENU LABEL AUTOMATED INSTALL
+  kernel /install/vmlinuz
+  append auto ramdisk_size=14984 initrd=/install/initrd.gz vga=normal DEBCONF_DEBUG=5
+EOF
+
+echo "INJECTING PRESEED AND LATE|FIRST_RUN SCRIPTS"
+
+cat>"$INITRD/preseed.cfg"<<EOF
+d-i debian-installer/locale string en_US
+d-i console-setup/ask_detect boolean false
+d-i console-setup/layoutcode string us
+d-i keyboard-configuration/layoutcode string us
+d-i netcfg/link_detection_timeout string 3
+d-i netcfg/disable_dhcp boolean true
+d-i netcfg/dhcp_timeout string 1
+d-i netcfg/dhcp_failed note
+d-i netcfg/dhcp_options select Configure network manually
+d-i netcfg/confirm_static boolean true
+d-i netcfg/get_nameservers string 8.8.8.8
+d-i netcfg/get_ipaddress string 172.16.199.199
+d-i netcfg/get_netmask string 255.255.255.255
+d-i netcfg/get_gateway string 172.16.199.199
+d-i netcfg/get_hostname string jumpserver
+d-i netcfg/get_domain string mydomain.com
+d-i netcfg/get_hostname seen true 
+d-i time/zone string UTC
+d-i clock-setup/ntp boolean fales
+#d-i clock-setup/ntp-server string time.apple.com
+d-i clock-setup/utc boolean true
+#d-i mirror/country string manual
+#d-i mirror/http/hostname string us.archive.ubuntu.com
+#d-i mirror/http/directory string /ubuntu
+d-i mirror/http/proxy string
+d-i partman-auto/method string regular
+d-i partman-auto/purge_lvm_from_device boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-auto/choose_recipe select atomic
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman-auto/disk string /dev/sda
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i partman-md/confirm boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i passwd/root-login boolean false
+d-i passwd/user-fullname string Ubuntu User
+d-i passwd/username string ubuntu
+d-i passwd/user-password-crypted password $6$Cjxz1rgM$ahShoUXrRY0qabPBMuFSmxRcwqkA2BRmb0B9Dlkzd5BfiunORoayXm3RZCEAsauW50JES9v1GTkkurnXmv8Ey0
+d-i user-setup/encrypt-home boolean false
+d-i pkgsel/include string openssh-server curl vim
+d-i pkgsel/update-policy select none
+bootstrap-base	base-installer/kernel/image	select	linux-generic-lts-raring
+d-i pkgsel/install-language-support boolean false
+tasksel tasksel/first multiselect standard, openssh-server
+openssh-server ssh/new_config  boolean true
+openssh-server ssh/use_old_init_script boolean true
+openssh-server ssh/protocol2_only boolean true
+openssh-server ssh/run_sshd boolean true
+d-i preseed/late_command string cp -ar /extras/* /target; in-target chmod 755 /root/late_command.sh; in-target sh /root/late_command.sh; 
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean true
+d-i finish-install/reboot_in_progress note
+EOF
+
+EXTRAS="$INITRD/extras/root"
+if [ ! -d $EXTRAS ]; then
+  mkdir -p $EXTRAS
+fi
+cat>"$INITRD/extras/root/late_command.sh"<<EOF
+EOF
 #
 #if [ ! -f $SOLOD/solo.rb ]; then
 #  cat>$SOLOD/solo.rb<<EOF
@@ -424,3 +475,6 @@ curl $REULURL -o $TMPDIR
 #  fi
 #  echo "$ISO successfully created" && exit 0
 #fi
+if [ -d $MOUNTDIR/isolinux ]; then
+  umount $MOUNTDIR
+fi
