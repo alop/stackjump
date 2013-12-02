@@ -104,8 +104,8 @@ done
 
 for BIN in fakeroot cpio mkisofs curl; do 
   if [ ! `which $BIN` ]; then
-    echo "$BIN needs to be installed to run stackjump" && exit 1
-    exit 1
+    echo "$BIN needs to be installed to run stackjump" 
+    apt-get -qq -y install genisoimage fakeroot cpio curl
   fi
 done
 
